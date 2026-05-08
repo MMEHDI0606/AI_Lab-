@@ -134,6 +134,10 @@ if st.session_state.screen == 'input':
             else:
                 st.error('test.csv not found. Place data files in data/raw/.')
 
+    # Clear stale RACE question/answer if the article was manually edited
+    if article_input != st.session_state.article:
+        st.session_state.question = ''
+        st.session_state.correct_letter = ''
     st.session_state.article = article_input
 
     if st.button('🚀 Generate Quiz', type='primary'):
@@ -144,38 +148,52 @@ if st.session_state.screen == 'input':
                 t0 = time.time()
                 try:
                     article = st.session_state.article
-                    # Use RACE question if loaded from sample, else use a generic one
-                    question = st.session_state.question or 'What is the main idea of the passage?'
-                    # Generate distractors around a representative answer phrase
-                    # Extract a short candidate answer from the article
-                    words = article.split()
-                    candidate_ans = ' '.join(words[:4]) if len(words) >= 4 else words[0] if words else 'unknown'
-                    distractors = generate_distractors(article, question, candidate_ans)
-                    hints = get_hints(article, question)
-                    elapsed = time.time() - t0
 
-                    # Build options: if RACE sample, use real options
+                    # Try to find a matching RACE row first
                     test_df = _load_test_df()
-                    if test_df is not None and st.session_state.correct_letter:
-                        # Try to find this row
+                    matched_row = None
+                    if test_df is not None:
                         match = test_df[test_df['article'] == article]
                         if not match.empty:
-                            r = match.iloc[0]
-                            opts = [str(r['A']), str(r['B']), str(r['C']), str(r['D'])]
-                            correct_letter = str(r['answer'])
-                        else:
-                            correct_answer = candidate_ans
-                            opts = [correct_answer] + distractors[:3]
-                            random.shuffle(opts)
-                            correct_letter = 'ABCD'[opts.index(correct_answer)]
+                            matched_row = match.iloc[0]
+
+                    if matched_row is not None:
+                        # ── RACE sample path: use real question + real options ──
+                        question       = str(matched_row['question'])
+                        opts           = [str(matched_row['A']), str(matched_row['B']),
+                                          str(matched_row['C']), str(matched_row['D'])]
+                        correct_letter = str(matched_row['answer'])
+                        correct_answer = opts['ABCD'.index(correct_letter)]
+                        distractors    = [o for o in opts if o != correct_answer]
                     else:
-                        correct_answer = candidate_ans
+                        # ── Custom article path: extract a meaningful answer phrase ──
+                        # Use the most content-rich sentence fragment (5-8 words, not opening words)
+                        question = st.session_state.question or 'What is the main topic discussed in the passage?'
+                        import re as _re
+                        sents = [s.strip() for s in _re.split(r'[.!?]', article) if len(s.split()) >= 6]
+                        if sents:
+                            # Pick the sentence with the most unique content words
+                            stop = {'the','a','an','is','was','are','were','of','in','to','and','or','it','that','this','for','with','by','on','at','from','as','but','not','be','have','has','had','they','their','which','who','what'}
+                            best = max(sents, key=lambda s: len(set(s.lower().split()) - stop))
+                            words = [w for w in best.split() if w.lower() not in stop]
+                            # Take a 3-5 word span from the middle of the best sentence
+                            mid = len(words) // 2
+                            span = words[max(0, mid-1):mid+3]
+                            correct_answer = ' '.join(span) if span else best.split()[0]
+                        else:
+                            words = article.split()
+                            correct_answer = words[len(words)//2] if words else 'unknown'
+                        distractors = generate_distractors(article, question, correct_answer)
                         opts = [correct_answer] + distractors[:3]
                         random.shuffle(opts)
                         correct_letter = 'ABCD'[opts.index(correct_answer)]
 
+                    hints   = get_hints(article, question)
+                    elapsed = time.time() - t0
+
                     st.session_state.options        = opts
                     st.session_state.correct_letter = correct_letter
+                    st.session_state.question       = question
                     st.session_state.distractors    = distractors
                     st.session_state.hints          = hints
                     st.session_state.chosen         = None

@@ -17,6 +17,8 @@
 - **UI framework:** Streamlit (recommended)
 - **Output root:** `race_rc_project/`
 - **NOTE REGARDING DATASET:** use only one file and split the data yourself in 80-10-10 proportion.
+- **Updated evaluation policy (mandatory):** Do not use Accuracy/Precision/Recall/F1/Exact Match as final project evaluation metrics.
+- **Final evaluation metrics must be:** BLEU, ROUGE, METEOR (for generated questions/answers/distractors/hints vs references).
 ---
 
 ## Project Folder Structure (agent must create this)
@@ -164,7 +166,7 @@ Steps to implement in order:
 ```
 [markdown cell: model name + brief description]
 [code cell: train]
-[code cell: evaluate on val set — print accuracy, macro F1, exact match]
+[code cell: internal diagnostic check (optional; not used for final grading)]
 [code cell: save model with joblib]
 ```
 
@@ -173,36 +175,36 @@ Steps to implement in order:
 **4a. Logistic Regression**
 - Features: One-Hot + cosine + lexical
 - `sklearn.linear_model.LogisticRegression(max_iter=1000, C=1.0)`
-- Report: Accuracy, Macro F1, Exact Match (fraction where argmax over 4 options == correct label)
+- Report: training diagnostics only (no Accuracy/Precision/Recall/F1/Exact Match in final evaluation tables)
 - Save: `models/model_a/traditional/lr_model.pkl`
 
 **4b. Support Vector Machine**
 - Features: One-Hot + cosine + lexical
 - `sklearn.svm.LinearSVC(max_iter=2000)`
 - Wrap with `CalibratedClassifierCV` for probability outputs
-- Report: same metrics
+- Report: diagnostics only (optional)
 - Save: `models/model_a/traditional/svm_model.pkl`
 
 **4c. Naive Bayes**
 - Features: CountVectorizer on question text only (question type classification)
 - `sklearn.naive_bayes.MultinomialNB()`
 - Target: first word of question (Who/What/Where/When/Why/How/Other)
-- Report: Accuracy, Macro F1 for question type classification
+- Report: diagnostics only (optional)
 - Save: `models/model_a/traditional/nb_model.pkl`
 
 **4d. Random Forest**
 - Features: lexical features only (no One-Hot — too sparse)
 - `sklearn.ensemble.RandomForestClassifier(n_estimators=200, random_state=42)`
-- Report: same metrics
+- Report: diagnostics only (optional)
 - Save: `models/model_a/traditional/rf_model.pkl`
 
-**4e. Comparison table cell** — print a formatted table:
+**4e. Comparison table cell** — print a formatted table of generation metrics:
 ```
-Model               | Accuracy | Macro F1 | Exact Match | Train time (s)
-Logistic Regression | ...      | ...      | ...         | ...
-SVM                 | ...      | ...      | ...         | ...
-Naive Bayes         | ...      | ...      | ...         | ...
-Random Forest       | ...      | ...      | ...         | ...
+Model               | BLEU | ROUGE-L | METEOR | Train time (s)
+Logistic Regression | ...  | ...     | ...    | ...
+SVM                 | ...  | ...     | ...    | ...
+Naive Bayes         | ...  | ...     | ...    | ...
+Random Forest       | ...  | ...     | ...    | ...
 ```
 
 ---
@@ -213,24 +215,24 @@ Random Forest       | ...      | ...      | ...         | ...
 - Input: One-Hot feature matrix (train set, unlabeled)
 - Elbow method: fit K-Means for K = 2..10, plot inertia
 - Fit final K-Means with best K
-- Report: Silhouette Score, Clustering Purity (map each cluster to majority label)
+- Report: clustering diagnostics only (not part of final grading metrics)
 - Visualize clusters with PCA → 2D scatter plot (color by cluster)
 
 **5b. Gaussian Mixture Model**
 - `sklearn.mixture.GaussianMixture(n_components=best_K)`
-- Report: Silhouette Score, log-likelihood
+- Report: diagnostics only (optional)
 - Compare soft vs hard assignments in a small table
 
 **5c. Label Propagation (Semi-Supervised)**
 - Take 10% of train as labeled, treat rest as unlabeled (label = -1)
 - `sklearn.semi_supervised.LabelPropagation(kernel='knn', n_neighbors=7)`
-- Report: F1 on the unlabeled portion (use true labels for evaluation only)
-- Comparison table: Supervised LR F1 vs Label Propagation F1
+- Report: diagnostics only (optional)
+- Comparison table: optional qualitative comparison only
 
 **5d. Ensemble**
 - Soft voting: average `predict_proba` from LR + SVM (calibrated) + RF
 - `sklearn.ensemble.VotingClassifier` or manual averaging
-- Report: Accuracy, Macro F1, EM on val set
+- Report: BLEU, ROUGE-L, METEOR on generated answer strings vs reference answers
 - Save ensemble predictions to `data/processed/ensemble_val_preds.npy`
 
 ---
@@ -254,6 +256,7 @@ Random Forest       | ...      | ...      | ...         | ...
 - Train `LinearSVC` on a small labeled subset (use existing RACE questions as positive examples, garbled sentences as negatives)
 - Select top-1 ranked question per article
 - Print 5 example (article snippet, generated question, gold question) triples
+- Evaluate generated questions using BLEU, ROUGE-L, METEOR against gold RACE questions
 
 ---
 
@@ -273,7 +276,7 @@ Random Forest       | ...      | ...      | ...         | ...
 - Label candidates: 1 if this phrase is one of the 3 original distractors, else 0
 - Train `LogisticRegression` on the above features
 - At inference: select top-3 non-answer candidates (with diversity penalty: cosine sim between selected distractors < 0.8)
-- Evaluate: Precision@3, Recall@3, F1@3 on val set; print Confusion Matrix
+- Evaluate generated distractors with BLEU, ROUGE-L, METEOR against reference distractors (B/C/D options excluding gold)
 
 **7d. Frequency-based fallback**
 - Identify high-frequency nouns in article (top-20 by count)
@@ -285,7 +288,7 @@ Random Forest       | ...      | ...      | ...         | ...
 - Rank sentences descending by score
 - Hint 1 = lowest-scoring sentence (general), Hint 2 = mid, Hint 3 = highest overlap (most explicit)
 - Train `LogisticRegression` on (keyword_overlap, position_in_article, sentence_length) to predict if sentence is the gold hint sentence
-- Report: Precision@1 (does top-ranked hint overlap with gold key sentence?), R² for regression scorer
+- Report: BLEU, ROUGE-L, METEOR for generated hints vs reference hint sentences
 
 **7f. Save Model B artifacts**
 - `models/model_b/traditional/distractor_ranker.pkl`
@@ -301,20 +304,20 @@ Random Forest       | ...      | ...      | ...         | ...
 ```python
 # ── FINAL RESULTS TABLE ──────────────────────────────────────────
 # Model A
-print("=== MODEL A — ANSWER VERIFICATION ===")
-# print accuracy, macro F1, EM for: LR, SVM, NB, RF, Ensemble
-# on BOTH val and test sets
+print("=== MODEL A — QUESTION/ANSWER GENERATION QUALITY ===")
+# print BLEU, ROUGE-L, METEOR for: LR, SVM, NB, RF, Ensemble
+# on BOTH val and test sets (where references are available)
 
 # Model B
 print("=== MODEL B — DISTRACTOR GENERATION ===")
-# print Precision@3, Recall@3, F1@3, Accuracy on test set
+# print BLEU, ROUGE-L, METEOR on test set
 
 print("=== MODEL B — HINT EXTRACTION ===")
-# print Precision@1, R² on test set
+# print BLEU, ROUGE-L, METEOR on test set
 
 # Unsupervised
 print("=== UNSUPERVISED / SEMI-SUPERVISED ===")
-# print Silhouette Score (K-Means), Purity (K-Means), Semi-supervised F1 (Label Prop)
+# print optional diagnostics (not used for final grading)
 ```
 
 **All metric values printed by this cell are what Phase 2 will read.**
@@ -328,7 +331,7 @@ Using `%%writefile`, export the following from the notebook:
 - `src/preprocessing.py` — all preprocessing functions
 - `src/model_a_train.py` — training logic for all Model A classifiers (callable as `python src/model_a_train.py`)
 - `src/model_b_train.py` — training logic for Model B
-- `src/evaluate.py` — `compute_metrics(y_true, y_pred)` returning dict of all metrics
+- `src/evaluate.py` — `compute_generation_metrics(pred_texts, ref_texts)` returning BLEU/ROUGE/METEOR
 - `src/inference.py` — `predict_answer(article, question, options)` and `generate_distractors(article, question, answer)` and `get_hints(article, question)` — loads pickled models
 
 ---
@@ -364,10 +367,10 @@ Before doing anything else, the agent must:
 
 1. Parse `notebooks/EDA_and_Training.ipynb` — extract all printed outputs from cell outputs
 2. Extract the following values from the Final Results Table (Section 8 output):
-   - Model A: Accuracy, Macro F1, Exact Match for each classifier (val + test)
-   - Model B: Precision@3, Recall@3, F1@3, Accuracy (test)
-   - Model B hint: Precision@1, R²
-   - Unsupervised: Silhouette Score, Purity, Semi-supervised F1
+   - Model A: BLEU, ROUGE-L, METEOR for each model (val + test)
+   - Model B distractors: BLEU, ROUGE-L, METEOR (test)
+   - Model B hints: BLEU, ROUGE-L, METEOR (test)
+   - Optional diagnostics: unsupervised/semi-supervised stats (not grading metrics)
 3. Extract figure paths from `data/processed/figures/`
 4. Store all values in a structured dict — these populate the report and dashboard
 
@@ -410,15 +413,15 @@ st.subheader("Question")
 ### Screen 4 — Analytics Dashboard
 ```
 st.subheader("Model A Performance")
-[table: Accuracy | Macro F1 | Exact Match for each classifier]
-[confusion matrix heatmap: st.pyplot]
+[table: BLEU | ROUGE-L | METEOR for each model]
+[chart: model-wise BLEU/ROUGE/METEOR comparison]
 
 st.subheader("Model B Performance")
-[table: Precision@3 | Recall@3 | F1@3 | Accuracy]
+[table: BLEU | ROUGE-L | METEOR for distractor and hint generation]
 
 st.subheader("Session Stats")
 [metric: total questions answered this session]
-[metric: session accuracy]
+[metric: avg BLEU for generated outputs in session]
 [metric: avg inference time (ms)]
 [button: "Export session log to CSV"]
 ```
@@ -459,6 +462,11 @@ def test_no_distractor_equals_correct_answer():
 def test_inference_latency():
     # time a single call to predict_answer + generate_distractors + get_hints
     # assert total < 10 seconds
+
+def test_generation_metrics_return_valid_ranges():
+   # call compute_generation_metrics(pred_texts, ref_texts)
+   # assert keys {'bleu','rouge_l','meteor'} exist
+   # assert each score is in [0.0, 1.0]
 ```
 
 ---
@@ -492,7 +500,7 @@ pytest tests/
 [paste folder tree]
 
 ## Results summary
-[table: Model A and Model B metrics — populated from notebook outputs]
+[table: BLEU | ROUGE-L | METEOR for Model A and Model B — populated from notebook outputs]
 ```
 
 ---
@@ -511,14 +519,14 @@ Sections (use the exact structure from the spec):
 5. **Model A: Design, Training, Results**
    - Architecture diagram (text-based, using markdown table or ASCII)
    - One-Hot encoding rationale
-   - Results table (all 4 classifiers + ensemble, val + test)
+   - Results table (all 4 classifiers + ensemble, val + test) using BLEU/ROUGE-L/METEOR
    - Unsupervised / semi-supervised results table
-   - Confusion matrix figure
+   - Generation quality comparison figure (BLEU/ROUGE/METEOR)
    - Discussion: which model performed best and why
 6. **Model B: Design, Training, Results**
    - Distractor pipeline description with example (article snippet → 3 distractors)
    - Hint extractor description with example
-   - Results: Precision@3, Recall@3, F1@3, R²
+   - Results: BLEU, ROUGE-L, METEOR
    - Discussion: diversity penalty impact
 7. **User Interface Description** — describe all 4 screens, include Streamlit component list
 8. **Evaluation & Discussion** — cross-model comparison, latency results, human evaluation summary
@@ -526,7 +534,7 @@ Sections (use the exact structure from the spec):
    - RACE cultural/linguistic bias (Chinese school exam origin)
    - No deployment in real exams without human review
    - One-Hot encoding limitations vs contextual embeddings
-   - Future: fine-tune BERT, add BLEU/ROUGE evaluation
+   - Future: fine-tune contextual models and add semantic metrics (e.g., BERTScore) alongside BLEU/ROUGE/METEOR
 10. **Conclusion**
 11. **References** — all 8 cited papers in IEEE format
 
@@ -548,6 +556,8 @@ joblib>=1.3
 matplotlib>=3.7
 seaborn>=0.13
 pytest>=8.0
+nltk>=3.8
+rouge-score>=0.1.2
 ```
 
 ---
@@ -558,8 +568,8 @@ The agent must verify all of the following before declaring Phase 2 done:
 
 - [ ] `ui/app.py` runs with `streamlit run ui/app.py` without import errors
 - [ ] All 4 screens reachable and wired to real model inference
-- [ ] `pytest tests/` passes all 5 tests
-- [ ] `README.md` contains accurate metric values from notebook outputs
+- [ ] `pytest tests/` passes all 6 tests
+- [ ] `README.md` contains accurate BLEU/ROUGE/METEOR values from notebook outputs
 - [ ] `report/final_report.pdf` generated with all sections complete and figures embedded
 - [ ] `requirements.txt` present with pinned versions
 - [ ] All files committed to git with meaningful commit messages

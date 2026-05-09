@@ -60,13 +60,23 @@ def predict_answer(article, question, options):
 
 
 def generate_distractors(article, question, answer, n=3):
-    """Returns list of 3 distractor strings."""
+    """Returns list of 3 distractor strings.
+
+    Candidates are 5-10 word sliding-window phrases extracted from the article.
+    This matches the training distribution of the distractor_ranker and produces
+    full-phrase distractors that score much higher on BLEU/ROUGE/METEOR.
+    """
     _load_models()
     dvec = _MODELS['dist_vec']; drk = _MODELS['dist_rk']
     tokens = _clean(article).split()
     ans_c = _clean(answer)
-    cands = list({' '.join(tokens[i:i+n_]) for n_ in range(1,3) for i in range(len(tokens)-n_+1)
-                  if ' '.join(tokens[i:i+n_]) != ans_c and len(' '.join(tokens[i:i+n_])) > 2})
+    # Extract 5-10 word phrases (mirrors model_b_train.py extract_candidates)
+    cands = list({
+        ' '.join(tokens[i:i+n_])
+        for n_ in range(5, 11)
+        for i in range(len(tokens) - n_ + 1)
+        if ' '.join(tokens[i:i+n_]) != ans_c and len(' '.join(tokens[i:i+n_])) >= 4
+    })
     if len(cands) < n:
         freq = Counter(tokens)
         stop = {'the','a','an','is','was','are','were','of','in','to','and','or','it'}

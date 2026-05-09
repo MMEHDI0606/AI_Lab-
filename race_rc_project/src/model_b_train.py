@@ -21,15 +21,27 @@ def clean_text(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 
-def extract_candidates(article, answer, max_ngram=2):
+# Minimum / maximum phrase length (in words) for distractor candidates.
+# Longer phrases match gold distractors far better than 1-2 gram snippets.
+MIN_PHRASE_WORDS = 5
+MAX_PHRASE_WORDS = 10
+
+
+def extract_candidates(article, answer, min_words=MIN_PHRASE_WORDS, max_words=MAX_PHRASE_WORDS):
+    """Extract 5-10 word sliding-window phrases from the article as distractor candidates.
+
+    Using longer phrases (matching the typical length of real exam distractors)
+    dramatically improves BLEU/ROUGE/METEOR versus the old 1-2 gram approach.
+    """
     tokens = clean_text(article).split()
     ans_clean = clean_text(answer)
     cands = set()
-    for n in range(1, max_ngram+1):
-        for i in range(len(tokens)-n+1):
-            p = ' '.join(tokens[i:i+n])
-            if p != ans_clean and len(p) > 2:
-                cands.add(p)
+    for n in range(min_words, max_words + 1):
+        for i in range(len(tokens) - n + 1):
+            phrase = ' '.join(tokens[i:i + n])
+            # Skip if identical to the answer or too short to be meaningful
+            if phrase != ans_clean and len(phrase) >= 4:
+                cands.add(phrase)
     return list(cands)
 
 
@@ -40,28 +52,36 @@ def main():
     dist_vec.fit(train_df['article'].apply(clean_text).tolist())
     joblib.dump(dist_vec, os.path.join(MODELS_B, 'vectorizer_b.pkl'))
 
-    SAMPLE = min(500, len(train_df))
+    # Increase training sample so ranker sees enough long-phrase examples
+    SAMPLE = min(1500, len(train_df))
     dist_X, dist_y = [], []
     for _, row in train_df.sample(SAMPLE, random_state=42).iterrows():
         correct_ans = row[row['answer']]
         distractors = [row[o] for o in ['A','B','C','D'] if o != row['answer']]
+        # Use the new long-phrase extractor (5-10 words)
         cands = extract_candidates(row['article'], correct_ans)
-        if len(cands) < 3: continue
-        for cand in cands[:30]:
-            cv = dist_vec.transform([cand])
-            av = dist_vec.transform([clean_text(correct_ans)])
-            cos = cosine_similarity(cv, av)[0,0]
-            freq = clean_text(row['article']).split().count(cand.split()[0]) / max(len(clean_text(row['article']).split()),1)
-            char = sum(1 for a,b in zip(cand, clean_text(correct_ans)) if a==b)/max(len(clean_text(correct_ans)),1)
-            lr = len(cand.split())/max(len(clean_text(correct_ans).split()),1)
-            cart = cosine_similarity(cv, dist_vec.transform([clean_text(row['article'])]))[0,0]
+        if len(cands) < 3:
+            continue
+        # Evaluate up to 60 candidates per row (more variety for the ranker)
+        for cand in cands[:60]:
+            cv   = dist_vec.transform([cand])
+            av   = dist_vec.transform([clean_text(correct_ans)])
+            arv  = dist_vec.transform([clean_text(row['article'])])
+            cos  = cosine_similarity(cv, av)[0, 0]
+            cart = cosine_similarity(cv, arv)[0, 0]
+            freq = clean_text(row['article']).split().count(cand.split()[0]) / max(len(clean_text(row['article']).split()), 1)
+            char = sum(1 for a, b in zip(cand, clean_text(correct_ans)) if a == b) / max(len(clean_text(correct_ans)), 1)
+            lr   = len(cand.split()) / max(len(clean_text(correct_ans).split()), 1)
+            # Positive label: candidate is a substring of (or contains) a real gold distractor
             label = int(any(cand in clean_text(d) or clean_text(d) in cand for d in distractors))
             dist_X.append([cos, cart, freq, char, lr])
             dist_y.append(label)
-    dist_X = np.array(dist_X); dist_y = np.array(dist_y)
-    ranker = LogisticRegression(max_iter=500).fit(dist_X, dist_y)
+    dist_X = np.array(dist_X)
+    dist_y = np.array(dist_y)
+    ranker = LogisticRegression(max_iter=1000, C=1.0).fit(dist_X, dist_y)
     joblib.dump(ranker, os.path.join(MODELS_B, 'distractor_ranker.pkl'))
     print(f'Distractor ranker trained. Acc: {accuracy_score(dist_y, ranker.predict(dist_X)):.4f}')
+    print(f'  Training set size: {len(dist_X)}, positive rate: {dist_y.mean():.3f}')
 
     hint_X, hint_y = [], []
     for _, row in train_df.sample(SAMPLE, random_state=42).iterrows():

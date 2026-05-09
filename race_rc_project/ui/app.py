@@ -42,7 +42,7 @@ MODEL_A_METRICS = {
     'Ensemble (Soft Vote)':{'bleu': 0.2735, 'rouge_1': 0.4469, 'rouge_l': 0.4401, 'meteor': 0.3787},
 }
 MODEL_B_METRICS = {
-    'Distractor Generation': {'bleu': 0.0034, 'rouge_1': 0.0720, 'rouge_l': 0.0708, 'meteor': 0.0289},
+    'Distractor Generation': {'bleu': 0.0173, 'rouge_1': 0.1206, 'rouge_l': 0.1065, 'meteor': 0.0954},
 }
 UNSUP_METRICS = {
     'K-Means Silhouette':    0.0947,

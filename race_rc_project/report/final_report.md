@@ -10,6 +10,8 @@
 
 This report presents a machine-learning pipeline for reading comprehension and automated quiz generation built on the RACE dataset (~87,866 questions from Chinese school exams). The system comprises two scikit-learn models: **Model A**, an ensemble answer-verification classifier (Logistic Regression + SVM + Random Forest) that selects the most likely correct answer from four options; and **Model B**, a distractor-generation ranker that extracts plausible wrong-answer candidates from the passage. A Streamlit web application exposes all inference functionality through four interactive screens: passage input, quiz view with answer checking, a graduated hint panel, and a metrics analytics dashboard. Evaluation uses BLEU, ROUGE, and METEOR exclusively. Best Model A result: LR BLEU 0.3027 / ROUGE-L 0.4664 / METEOR 0.4072. Model B distractor BLEU 0.0034 / ROUGE-L 0.0708 / METEOR 0.0289.
 
+Instructor update: although the original project handout listed several classification-style metrics, final project evaluation and reporting for this submission use BLEU, ROUGE, and METEOR because the system output is generated text that must be compared against reference text.
+
 ---
 
 ## 2. Introduction & Motivation
@@ -189,7 +191,7 @@ Single-sample inference (predict + distractor + hints): ~0.3–1.5 s on CPU (Mac
 
 ### Metric Discussion
 
-BLEU/ROUGE/METEOR are used because the task is framed as text generation (model selects a text span as the predicted answer vs a reference text span). Traditional accuracy/F1 would treat all wrong answers as equally wrong, whereas BLEU/ROUGE reward partial lexical overlap — important when model picks a near-correct paraphrase.
+BLEU/ROUGE/METEOR are used because the task is framed as text generation: predicted answer strings, generated questions, distractors, and hints are compared directly against reference text. Following the updated course guidance, classification metrics such as Accuracy, Precision, Recall, and F1 are not used as final project evaluation metrics in this report.
 
 ---
 

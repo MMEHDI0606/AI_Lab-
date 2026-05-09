@@ -2,6 +2,8 @@
 
 A scikit-learn–based reading comprehension system trained on the RACE dataset. Trains two models to verify answers and generate distractors/hints, then serves them through a Streamlit UI.
 
+Final evaluation and reporting use BLEU, ROUGE, and METEOR on generated text against reference text. Accuracy, Precision, Recall, F1, and related classification metrics may still appear as internal diagnostics for intermediate components, but they are not the final project metrics.
+
 ## Setup
 
 ```bash
@@ -101,3 +103,5 @@ race_rc_project/
 | GMM Silhouette          | 0.0130    |
 | GMM Log-Likelihood      | 5208.3940 |
 | Label Propagation F1    | 0.4303    |
+
+See [PROJECT_REQUIREMENTS_CHECKLIST.md](c:\Users\hkals\Desktop\UNI-sem5\ai_proj\race_rc_project\PROJECT_REQUIREMENTS_CHECKLIST.md) for a consolidated submission checklist based on the assignment PDF plus the instructor metric update.

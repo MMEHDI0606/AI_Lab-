@@ -108,3 +108,8 @@ def test_generation_metrics_return_valid_ranges():
     assert required_keys.issubset(m.keys()), f"Missing keys: {required_keys - m.keys()}"
     for key in required_keys:
         assert 0.0 <= m[key] <= 1.0, f"{key}={m[key]} is out of [0, 1]"
+
+
+def test_generation_metrics_reject_class_labels():
+    with pytest.raises(ValueError):
+        compute_generation_metrics(['1', '0', '1'], ['1', '1', '0'])

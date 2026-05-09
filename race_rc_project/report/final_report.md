@@ -1,7 +1,6 @@
 # RACE Reading Comprehension & Quiz Generation System — Final Report
 
-**Course:** AI Lab (Semester 5)  
-**Dataset:** RACE — ReAding Comprehension from Examinations  
+**Name and Roll No. : 23i0048 23i0614 Mehdi and Fahad** 
 **Framework:** scikit-learn (CPU-only, no deep learning)
 
 ---

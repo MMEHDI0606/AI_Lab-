@@ -92,7 +92,7 @@ race_rc_project/
 
 | Task                    | BLEU   | ROUGE-1 | ROUGE-L | METEOR |
 |-------------------------|--------|---------|---------|--------|
-| Distractor Generation   | 0.0034 | 0.0720  | 0.0708  | 0.0289 |
+| Distractor Generation   | 0.0173 | 0.1206  | 0.1065  | 0.0954 |
 
 ### Unsupervised / Semi-Supervised (diagnostics only)
 

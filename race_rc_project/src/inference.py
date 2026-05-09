@@ -24,6 +24,9 @@ def _load_models():
     _MODELS['dist_vec'] = joblib.load(os.path.join(MODELS_B, 'vectorizer_b.pkl'))
     _MODELS['dist_rk']  = joblib.load(os.path.join(MODELS_B, 'distractor_ranker.pkl'))
     _MODELS['hint_sk']  = joblib.load(os.path.join(MODELS_B, 'hint_scorer.pkl'))
+    # q_ranker is optional — present only if Section 6 of the notebook was run
+    q_ranker_path = os.path.join(MODELS_A, 'q_ranker.pkl')
+    _MODELS['q_ranker'] = joblib.load(q_ranker_path) if os.path.exists(q_ranker_path) else None
 
 
 def _clean(text):
@@ -59,14 +62,125 @@ def predict_answer(article, question, options):
     return ['A','B','C','D'][int(np.argmax(scores))]
 
 
+# Stop-words used by generate_question to identify content-rich sentences
+_STOP = {
+    'the','a','an','is','was','are','were','of','in','to','and','or','it',
+    'that','this','for','with','by','on','at','from','as','but','not','be',
+    'have','has','had','they','their','which','who','what','he','she','we',
+    'his','her','our','its','you','your','do','did','does','will','would',
+    'could','should','may','might','then','than','when','also','so','if',
+}
+
+
+def generate_question(article):
+    """Generate a question and correct-answer phrase from the article.
+
+    Pipeline (ported from notebook Section 6):
+      1. Split article into sentences; pick the most content-word-rich one.
+      2. Extract a 3-5 word correct-answer span from its middle.
+      3. Score all sentences by overlap with the answer to find best source sentences.
+      4. Apply three Wh-word templates to produce candidate questions.
+      5. Rank candidates with q_ranker.pkl (if available) and return the best one.
+
+    Returns
+    -------
+    (question : str, correct_answer : str)
+    """
+    _load_models()
+
+    # ── Step 1: pick the most content-rich sentence ──
+    sents = [s.strip() for s in re.split(r'[.!?]', article) if len(s.split()) >= 6]
+    if not sents:
+        sents = [article[:300]]
+
+    best_sent = max(sents, key=lambda s: len(set(s.lower().split()) - _STOP))
+
+    # ── Step 2: extract a 3-5 word answer span from the middle ──
+    content_words = [w for w in best_sent.split() if w.lower() not in _STOP]
+    mid = len(content_words) // 2
+    span = content_words[max(0, mid - 1): mid + 3]
+    correct_answer = ' '.join(span) if span else best_sent.split()[0]
+
+    # ── Step 3: score sentences by keyword overlap with the answer ──
+    ans_toks = set(_clean(correct_answer).split())
+    scored = sorted(
+        sents,
+        key=lambda s: len(set(_clean(s).split()) & ans_toks) / max(len(ans_toks), 1),
+        reverse=True,
+    )
+    top_sents = scored[:3]
+
+    # ── Step 4: generate candidate questions via templates ──
+    def _make_candidates(sentence, answer):
+        cands = []
+        ans_c = _clean(answer)
+        sent_c = _clean(sentence)
+        # Template 1: fill-in-the-blank
+        if ans_c in sent_c:
+            blanked = re.sub(re.escape(ans_c), '___', sent_c, count=1)
+            cands.append(f'Fill in the blank: "{blanked}"')
+        # Template 2: capitalised proper noun → Who/What question
+        caps = re.findall(r'\b[A-Z][a-z]{2,}\b', sentence)
+        if caps:
+            cands.append(f'Who or what is {caps[0]}?')
+        # Template 3: generic What question from first two words
+        words = sentence.split()
+        if len(words) >= 4:
+            subj = ' '.join(words[:2])
+            cands.append(f'What can be said about {subj}?')
+        return cands
+
+    all_candidates = []
+    for sent in top_sents:
+        all_candidates.extend(_make_candidates(sent, correct_answer))
+
+    if not all_candidates:
+        return 'What is the main topic discussed in the passage?', correct_answer
+
+    # ── Step 5: rank with q_ranker if available ──
+    q_ranker = _MODELS.get('q_ranker')
+    if q_ranker is not None:
+        def _q_feats(q):
+            toks = q.lower().split()
+            starts_wh = int(bool(toks) and toks[0] in
+                           {'who','what','where','when','why','how','which','fill'})
+            qt  = set(_clean(q).split())
+            at  = set(_clean(article).split())
+            ant = set(_clean(correct_answer).split())
+            return [
+                len(toks),
+                starts_wh,
+                len(qt & at)  / max(len(qt), 1),
+                len(qt & ant) / max(len(qt), 1),
+            ]
+        feats  = [_q_feats(q) for q in all_candidates]
+        scores = q_ranker.decision_function(feats)
+        best_q = all_candidates[int(np.argmax(scores))]
+    else:
+        # No ranker: prefer fill-in-the-blank > wh-question > generic
+        best_q = all_candidates[0]
+
+    return best_q, correct_answer
+
+
 def generate_distractors(article, question, answer, n=3):
-    """Returns list of 3 distractor strings."""
+    """Returns list of 3 distractor strings.
+
+    Candidates are 5-10 word sliding-window phrases extracted from the article.
+    This matches the training distribution of the distractor_ranker and produces
+    full-phrase distractors that score much higher on BLEU/ROUGE/METEOR.
+    """
     _load_models()
     dvec = _MODELS['dist_vec']; drk = _MODELS['dist_rk']
     tokens = _clean(article).split()
     ans_c = _clean(answer)
-    cands = list({' '.join(tokens[i:i+n_]) for n_ in range(1,3) for i in range(len(tokens)-n_+1)
-                  if ' '.join(tokens[i:i+n_]) != ans_c and len(' '.join(tokens[i:i+n_])) > 2})
+    # Extract 5-10 word phrases (mirrors model_b_train.py extract_candidates)
+    cands = list({
+        ' '.join(tokens[i:i+n_])
+        for n_ in range(5, 11)
+        for i in range(len(tokens) - n_ + 1)
+        if ' '.join(tokens[i:i+n_]) != ans_c and len(' '.join(tokens[i:i+n_])) >= 4
+    })
     if len(cands) < n:
         freq = Counter(tokens)
         stop = {'the','a','an','is','was','are','were','of','in','to','and','or','it'}

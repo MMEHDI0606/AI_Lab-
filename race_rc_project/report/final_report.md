@@ -8,7 +8,7 @@
 
 ## 1. Abstract
 
-This report presents a machine-learning pipeline for reading comprehension and automated quiz generation built on the RACE dataset (~87,866 questions from Chinese school exams). The system comprises two scikit-learn models: **Model A**, an ensemble answer-verification classifier (Logistic Regression + SVM + Random Forest) that selects the most likely correct answer from four options; and **Model B**, a distractor-generation ranker that extracts plausible wrong-answer candidates from the passage. A Streamlit web application exposes all inference functionality through four interactive screens: passage input, quiz view with answer checking, a graduated hint panel, and a metrics analytics dashboard. Evaluation uses BLEU, ROUGE, and METEOR exclusively. Best Model A result: LR BLEU 0.3027 / ROUGE-L 0.4664 / METEOR 0.4072. Model B distractor BLEU 0.0034 / ROUGE-L 0.0708 / METEOR 0.0289.
+This report presents a machine-learning pipeline for reading comprehension and automated quiz generation built on the RACE dataset (~87,866 questions from Chinese school exams). The system comprises two scikit-learn models: **Model A**, a weighted soft-vote ensemble answer-verification classifier (Logistic Regression × 0.7 + SVM × 0.3) that selects the most likely correct answer from four options; and **Model B**, a distractor-generation and hint-extraction pipeline that produces plausible wrong-answer candidates and graduated supporting sentences from the passage. A Streamlit web application exposes all inference functionality through four interactive screens: passage input, quiz view with answer checking, a graduated hint panel, and a metrics analytics dashboard. Evaluation uses BLEU, ROUGE, and METEOR exclusively. Best Model A result: LR BLEU 0.3042 / ROUGE-L 0.4637 / METEOR 0.4136. Model B distractor BLEU 0.0067 / ROUGE-L 0.0748 / METEOR 0.0313. Hint generation ROUGE-L 0.1375.
 
 Instructor update: although the original project handout listed several classification-style metrics, final project evaluation and reporting for this submission use BLEU, ROUGE, and METEOR because the system output is generated text that must be compared against reference text.
 
@@ -80,7 +80,7 @@ Cosine similarity feature (article vs option)
          ├─ Logistic Regression (saga, C=1, max_iter=1000)
          ├─ SVM + CalibratedClassifierCV (LinearSVC, max_iter=2000)
          ├─ Random Forest (200 trees, lexical features only)
-         └─ Ensemble: soft-vote average of all three
+         └─ Ensemble: weighted soft-vote  LR×0.7 + SVM×0.3  (RF excluded)
 ```
 
 Each model operates as a **binary classifier** per option (label=1 if correct), then the option with highest predicted probability is chosen as the answer. This converts the 4-way choice into 4 binary predictions.
@@ -91,14 +91,14 @@ One-Hot (binary CountVectorizer) preserves token presence without inflating freq
 
 ### Results Table (test set)
 
-| Model               | BLEU   | ROUGE-1 | ROUGE-L | METEOR |
-|---------------------|--------|---------|---------|--------|
-| Logistic Regression | 0.3027 | 0.4733  | 0.4664  | 0.4072 |
-| SVM (Calibrated)    | 0.3018 | 0.4725  | 0.4655  | 0.4062 |
-| Random Forest       | 0.2573 | 0.4268  | 0.4199  | 0.3595 |
-| Ensemble (Soft Vote)| 0.2735 | 0.4469  | 0.4401  | 0.3787 |
+| Model                         | BLEU   | ROUGE-1 | ROUGE-L | METEOR |
+|-------------------------------|--------|---------|---------|--------|
+| Logistic Regression           | 0.3042 | 0.4703  | 0.4637  | 0.4136 |
+| SVM (Calibrated)              | 0.3033 | 0.4694  | 0.4628  | 0.4126 |
+| Random Forest                 | 0.2591 | 0.4239  | 0.4174  | 0.3662 |
+| Ensemble (LR×0.7 + SVM×0.3)  | 0.3038 | 0.4698  | 0.4633  | 0.4132 |
 
-**Best model:** Logistic Regression — highest BLEU (0.3027), ROUGE-L (0.4664), and METEOR (0.4072). LR benefits most from the high-dimensional sparse feature matrix; the regularised linear boundary generalises better than the tree ensemble (RF uses only 5 lexical features, limiting its ceiling). The soft-vote ensemble underperforms LR alone because averaging with RF introduces noise.
+**Best model:** Logistic Regression — highest BLEU (0.3042), ROUGE-L (0.4637), and METEOR (0.4136). LR benefits most from the high-dimensional sparse feature matrix; the regularised linear boundary generalises better than the tree ensemble (RF uses only 5 lexical features, limiting its ceiling). The weighted ensemble (LR×0.7 + SVM×0.3) is close to LR (BLEU 0.3038 vs 0.3042); RF was excluded from the ensemble because its lexical-only feature space adds noise when averaged with the higher-dimensional LR/SVM predictions. The preprocessing-symmetry fix (`_clean_for_eval`) — lowercase + punctuation removal applied identically to both prediction and reference — slightly adjusted scores relative to the earlier strip-only baseline.
 
 ### Unsupervised / Semi-Supervised (diagnostics)
 
@@ -150,11 +150,12 @@ Sentences are scored by keyword overlap between question tokens and sentence tok
 
 ### Results
 
-| Task                  | BLEU   | ROUGE-1 | ROUGE-L | METEOR |
-|-----------------------|--------|---------|---------|--------|
-| Distractor Generation | 0.0034 | 0.0720  | 0.0708  | 0.0289 |
+| Task                                  | BLEU   | ROUGE-1 | ROUGE-L | METEOR |
+|---------------------------------------|--------|---------|---------|--------|
+| Distractor Generation                 | 0.0067 | 0.0762  | 0.0748  | 0.0313 |
+| Hint Generation (target-sent. proxy)  | 0.0605 | 0.1537  | 0.1375  | 0.1130 |
 
-Low BLEU is expected — distractor candidates are extracted as short n-grams from the passage, which rarely match the exact wording of the reference distractors (full option sentences). ROUGE-1 (0.072) captures unigram overlap better, confirming partial lexical match.
+Low BLEU for distractors is expected — candidates are short n-grams that rarely match the exact wording of reference option sentences. ROUGE-1 (0.0762) captures unigram overlap better, confirming partial lexical match. Hint evaluation uses a **proxy reference**: the passage sentence with maximum keyword overlap with the answer (since RACE has no gold hints). ROUGE-L 0.1375 for hints confirms meaningful sentence-level recall of relevant content.
 
 ### Diversity Penalty Impact
 
@@ -181,9 +182,9 @@ All error states show `st.error(...)`. Every model call is wrapped in `st.spinne
 
 ### Cross-Model Comparison
 
-Logistic Regression outperforms all other single models on every metric. The key insight is that the combined feature space (One-Hot + cosine + lexical) is extremely high-dimensional (~5 007 features), which favours linear models — LR's L2 regularisation navigates this space efficiently. SVM is competitive (BLEU 0.3018 vs 0.3027) but marginally weaker after calibration. Random Forest's restriction to 5 lexical features is a hard ceiling, explaining the ~6 BLEU-point gap.
+Logistic Regression outperforms all other single models on every metric. The combined feature space (One-Hot + cosine + lexical) is extremely high-dimensional (~5 007 features), which favours linear models — LR's L2 regularisation navigates this space efficiently. SVM is competitive (BLEU 0.3033 vs 0.3042) but marginally weaker after calibration. Random Forest's restriction to 5 lexical features is a hard ceiling, explaining the ~5 BLEU-point gap.
 
-The ensemble being weaker than LR alone is a counter-intuitive result. The soft-vote average dilutes LR's strong probability estimates by adding RF's noisy low-dimensional predictions.
+The weighted ensemble (LR×0.7 + SVM×0.3) achieves BLEU 0.3038, just below LR (0.3042). RF was excluded because its noisy low-dimensional predictions diluted the ensemble; the weighted two-model variant eliminates this degradation and stays within 0.0004 BLEU of the best single model.
 
 ### Latency
 
@@ -211,7 +212,7 @@ BLEU/ROUGE/METEOR are used because the task is framed as text generation: predic
 
 ## 10. Conclusion
 
-This project demonstrates that classical scikit-learn models can achieve meaningful performance on the RACE reading comprehension benchmark when equipped with rich bag-of-words and lexical features. Logistic Regression (BLEU 0.3027, METEOR 0.4072) outperforms SVM, Random Forest, and a soft-vote ensemble on the test set. Model B generates plausible distractors at ROUGE-1 0.0720, constrained by the n-gram extraction approach. The Streamlit UI makes all inference capabilities accessible through a clean four-screen interface. All six unit tests pass, and the system runs within the 10-second latency budget on standard CPU hardware.
+This project demonstrates that classical scikit-learn models can achieve meaningful performance on the RACE reading comprehension benchmark when equipped with rich bag-of-words and lexical features. Logistic Regression (BLEU 0.3042, METEOR 0.4136) outperforms SVM, Random Forest, and the weighted ensemble on the test set. The weighted ensemble (LR×0.7 + SVM×0.3) closely tracks LR (BLEU 0.3038) after removing the noisy RF component. Model B generates plausible distractors at ROUGE-1 0.0762 and hint sentences at ROUGE-L 0.1375 (using a target-sentence proxy reference), constrained by the n-gram extraction approach. Preprocessing symmetry (`_clean_for_eval`) ensures identical lowercasing and punctuation removal is applied to both prediction and reference before scoring. The Streamlit UI makes all inference capabilities accessible through a clean four-screen interface. All seven unit tests pass, and the system runs within the 10-second latency budget on standard CPU hardware.
 
 ---
 
